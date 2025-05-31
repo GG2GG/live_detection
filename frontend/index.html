@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Object Detection & Tracking</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .stats-container {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+        }
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 0.5rem 0;
+        }
+        .stat-label {
+            font-weight: bold;
+        }
+        .stat-value {
+            color: #10B981;
+        }
+        #connectionStatus {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #10B981;
+            color: white;
+        }
+        .disconnected {
+            background-color: #EF4444;
+            color: white;
+        }
+        .control-button {
+            background-color: #4B5563;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            margin: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .control-button:hover {
+            background-color: #6B7280;
+        }
+        .control-button.active {
+            background-color: #10B981;
+        }
+        .session-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        .session-table th,
+        .session-table td {
+            padding: 0.5rem;
+            border: 1px solid #4B5563;
+            text-align: left;
+        }
+        .session-table th {
+            background-color: #4B5563;
+        }
+        .session-table tr:nth-child(even) {
+            background-color: rgba(75, 85, 99, 0.2);
+        }
+        .settings-panel {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .settings-group {
+            margin-bottom: 1rem;
+        }
+        .settings-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+            background-color: #4B5563;
+            color: white;
+            border: 1px solid #6B7280;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            height: 0.5rem;
+            background: #6B7280;
+            border-radius: 0.25rem;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 1rem;
+            height: 1rem;
+            background: #10B981;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .pause-summary {
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            color: white;
+        }
+        
+        .summary-section {
+            margin-bottom: 20px;
+        }
+        
+        .summary-section h4 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+        
+        .summary-section ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .summary-section li {
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        .summary-content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 15px;
+        }
+
+        .classification-categories {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .category {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .category h5 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }
+
+        .category-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .stat-label {
+            color: #666;
+        }
+
+        .stat-value {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .tracked-people {
+            margin-top: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .person-card {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 10px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .person-card h6 {
+            margin: 0 0 8px 0;
+            color: #2c3e50;
+        }
+
+        .person-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 0.9em;
+        }
+
+        .confidence-high {
+            color: #27ae60;
+        }
+
+        .confidence-medium {
+            color: #f39c12;
+        }
+
+        .confidence-low {
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div id="connectionStatus" class="disconnected">Disconnected</div>
+    
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">Live Object Detection & Tracking</h1>
+        
+        <!-- Settings Panel -->
+        <div class="settings-panel mb-8">
+            <h2 class="text-xl font-bold mb-4">Settings</h2>
+            <div class="settings-grid">
+                <!-- Source Selection -->
+                <div class="settings-group">
+                    <label class="settings-label">Video Source</label>
+                    <div class="flex space-x-2">
+                        <button id="webcamBtn" class="control-button active">Webcam</button>
+                        <form id="uploadForm" class="inline-block">
+                            <input type="file" id="videoFile" accept="video/*" class="hidden">
+                            <button type="button" onclick="document.getElementById('videoFile').click()" 
+                                    class="control-button">
+                                Upload Video
+                            </button>
+                        </form>
+                    </div>
+                    <span id="selectedFile" class="ml-2 text-sm"></span>
+                </div>
+
+                <!-- Model Selection -->
+                <div class="settings-group">
+                    <label class="settings-label">Detection Model</label>
+                    <select id="modelSelect" class="w-full">
+                        <option value="nano">YOLOv8 Nano (Fastest)</option>
+                        <option value="small">YOLOv8 Small</option>
+                        <option value="medium" selected>YOLOv8 Medium (Balanced)</option>
+                        <option value="large">YOLOv8 Large</option>
+                        <option value="xlarge">YOLOv8 XLarge (Most Accurate)</option>
+                    </select>
+                </div>
+
+                <!-- Confidence Threshold -->
+                <div class="settings-group">
+                    <label class="settings-label">Confidence Threshold: <span id="confidenceValue">0.4</span></label>
+                    <input type="range" id="confidenceSlider" min="0.1" max="0.9" step="0.1" value="0.4">
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Video Feed -->
+            <div class="lg:col-span-2">
+                <div class="video-container">
+                    <img id="videoFeed" class="w-full rounded-lg shadow-lg" alt="Video Feed">
+                    <div class="mt-4 text-center">
+                        <button id="playPauseBtn" class="control-button">
+                            Pause
+                        </button>
+                        <button id="stopInferenceBtn" class="control-button bg-red-600 hover:bg-red-700">
+                            Stop Inference
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Stats -->
+            <div class="lg:col-span-1">
+                <div class="stats-container">
+                    <h2 class="text-xl font-bold mb-4">Live Statistics</h2>
+                    
+                    <div class="mb-6">
+                        <h3 class="text-lg font-semibold mb-2">Current Objects</h3>
+                        <div id="liveCounts" class="space-y-2">
+                            <!-- Live counts will be inserted here -->
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-lg font-semibold mb-2">Tracking Analytics</h3>
+                        <div class="stat-item">
+                            <span class="stat-label">Total Unique IDs:</span>
+                            <span id="totalIds" class="stat-value">0</span>
+                        </div>
+                        <div id="trackCounts" class="mt-4">
+                            <!-- Track counts will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session History -->
+        <div class="mt-8">
+            <h2 class="text-2xl font-bold mb-4">Session History</h2>
+            <div class="stats-container">
+                <table class="session-table">
+                    <thead>
+                        <tr>
+                            <th>Session ID</th>
+                            <th>Duration</th>
+                            <th>Total Frames</th>
+                            <th>Unique Objects</th>
+                            <th>Video Source</th>
+                            <th>Model Used</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessionHistory">
+                        <!-- Session history will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div id="session-summary" class="hidden">
+            <h3>Session Summary</h3>
+            <div class="summary-content">
+                <div class="summary-section">
+                    <h4>Session Details</h4>
+                    <p>Duration: <span id="summary-duration"></span></p>
+                    <p>Total Frames: <span id="summary-frames"></span></p>
+                    <p>Video Source: <span id="summary-source"></span></p>
+                    <p>Model Used: <span id="summary-model"></span></p>
+                </div>
+                <div class="summary-section">
+                    <h4>Person Classification Summary</h4>
+                    <div id="person-classification-summary">
+                        <div class="classification-categories">
+                            <div class="category">
+                                <h5>Age Groups</h5>
+                                <div id="age-groups" class="category-stats"></div>
+                            </div>
+                            <div class="category">
+                                <h5>Gender</h5>
+                                <div id="gender-stats" class="category-stats"></div>
+                            </div>
+                            <div class="category">
+                                <h5>Clothing</h5>
+                                <div id="clothing-stats" class="category-stats"></div>
+                            </div>
+                            <div class="category">
+                                <h5>Activity</h5>
+                                <div id="activity-stats" class="category-stats"></div>
+                            </div>
+                        </div>
+                        <div class="tracked-people">
+                            <h5>Currently Tracked People</h5>
+                            <div id="tracked-people-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const connectionStatus = document.getElementById('connectionStatus');
+        const videoFeed = document.getElementById('videoFeed');
+        const liveCounts = document.getElementById('liveCounts');
+        const totalIds = document.getElementById('totalIds');
+        const trackCounts = document.getElementById('trackCounts');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const videoFile = document.getElementById('videoFile');
+        const selectedFile = document.getElementById('selectedFile');
+        const sessionHistory = document.getElementById('sessionHistory');
+        const webcamBtn = document.getElementById('webcamBtn');
+        const modelSelect = document.getElementById('modelSelect');
+        const confidenceSlider = document.getElementById('confidenceSlider');
+        const confidenceValue = document.getElementById('confidenceValue');
+
+        let ws = null;
+        let isPlaying = true;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        const reconnectDelay = 2000;
+        let isConnected = false;
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = connected ? 'Connected' : 'Disconnected';
+            status.className = connected ? 'connected' : 'disconnected';
+            isConnected = connected;
+        }
+
+        function connectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            console.log('Connecting to WebSocket:', wsUrl);
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateConnectionStatus(true);
+                reconnectAttempts = 0;
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // Update video feed
+                if (data.frame) {
+                    document.getElementById('videoFeed').src = `data:image/jpeg;base64,${data.frame}`;
+                }
+                
+                // Update live counts
+                const liveCountsDiv = document.getElementById('live-counts');
+                liveCountsDiv.innerHTML = '<h4>Current Objects:</h4>';
+                for (const [obj, count] of Object.entries(data.live_counts)) {
+                    liveCountsDiv.innerHTML += `<p>${obj}: ${count}</p>`;
+                }
+                
+                // Update tracking stats
+                const trackingStatsDiv = document.getElementById('tracking-stats');
+                trackingStatsDiv.innerHTML = `
+                    <h4>Tracking Analytics:</h4>
+                    <p>Total Unique IDs: ${data.analytics.total_unique_ids}</p>
+                    <p>Active Tracks: ${Object.keys(data.analytics.active_tracks).length}</p>
+                `;
+                
+                // Update play/pause button
+                const playPauseBtn = document.getElementById('playPauseBtn');
+                playPauseBtn.textContent = data.is_playing ? 'Pause' : 'Play';
+                playPauseBtn.className = data.is_playing ? 'control-btn playing' : 'control-btn paused';
+                
+                // Update model info
+                document.getElementById('current-model').textContent = data.current_model;
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    console.log(`Attempting to reconnect (${reconnectAttempts + 1}/${maxReconnectAttempts})...`);
+                    setTimeout(connectWebSocket, reconnectDelay);
+                    reconnectAttempts++;
+                } else {
+                    console.log('Max reconnection attempts reached');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus(false);
+            };
+        }
+
+        // Handle video upload
+        videoFile.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            selectedFile.textContent = file.name;
+            webcamBtn.classList.remove('active');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                console.log('Upload result:', result);
+                loadSessionHistory();
+            } catch (error) {
+                console.error('Upload error:', error);
+            }
+        });
+
+        // Handle webcam switch
+        webcamBtn.addEventListener('click', async function() {
+            try {
+                const response = await fetch('/webcam', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'webcam_id=0'
+                });
+                const result = await response.json();
+                console.log('Webcam mode result:', result);
+                loadSessionHistory();
+            } catch (error) {
+                console.error('Webcam mode error:', error);
+            }
+        });
+
+        // Handle model change
+        modelSelect.addEventListener('change', async function() {
+            try {
+                const response = await fetch('/model', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `model_name=${this.value}`
+                });
+                const result = await response.json();
+                console.log('Model change result:', result);
+            } catch (error) {
+                console.error('Model change error:', error);
+            }
+        });
+
+        // Handle confidence threshold change
+        confidenceSlider.addEventListener('input', async function() {
+            const value = parseFloat(this.value);
+            confidenceValue.textContent = value.toFixed(1);
+            
+            try {
+                const response = await fetch('/confidence', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `threshold=${value}`
+                });
+                const result = await response.json();
+                console.log('Confidence change result:', result);
+            } catch (error) {
+                console.error('Confidence change error:', error);
+            }
+        });
+
+        // Handle play/pause
+        playPauseBtn.addEventListener('click', async function() {
+            try {
+                const response = await fetch('/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'action=toggle'
+                });
+                const result = await response.json();
+                console.log('Playback control result:', result);
+                
+                // Update button text
+                playPauseBtn.textContent = result.is_playing ? 'Pause' : 'Play';
+                
+                // Show summary when paused
+                if (!result.is_playing && result.summary) {
+                    const summaryDiv = document.getElementById('session-summary');
+                    summaryDiv.classList.remove('hidden');
+                    updateSessionSummary(result.summary);
+                } else {
+                    const summaryDiv = document.getElementById('session-summary');
+                    summaryDiv.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('Playback control error:', error);
+            }
+        });
+
+        // Handle stop inference
+        document.getElementById('stopInferenceBtn').addEventListener('click', async function() {
+            try {
+                const response = await fetch('/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'action=stop'
+                });
+                const result = await response.json();
+                console.log('Stop inference result:', result);
+                
+                // Update button states
+                playPauseBtn.textContent = 'Play';
+                playPauseBtn.disabled = true;
+                this.disabled = true;
+                
+                // Show final summary
+                const summaryDiv = document.getElementById('session-summary');
+                summaryDiv.classList.remove('hidden');
+                updateSessionSummary(result.summary);
+            } catch (error) {
+                console.error('Stop inference error:', error);
+            }
+        });
+
+        function showSessionSummary(summary) {
+            const summaryDiv = document.getElementById('session-summary');
+            summaryDiv.classList.remove('hidden');
+            updateSessionSummary(summary);
+        }
+
+        function hideSessionSummary() {
+            const summaryDiv = document.getElementById('session-summary');
+            summaryDiv.classList.add('hidden');
+        }
+
+        // Load session history
+        async function loadSessionHistory() {
+            try {
+                const response = await fetch('/sessions');
+                const sessions = await response.json();
+                
+                const tbody = document.querySelector('#session-table tbody');
+                tbody.innerHTML = '';
+                
+                sessions.forEach(session => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${session.session_id}</td>
+                        <td>${session.duration}</td>
+                        <td>${session.total_frames}</td>
+                        <td>${Object.entries(session.unique_objects)
+                            .map(([obj, count]) => `${obj}: ${count}`)
+                            .join(', ')}</td>
+                        <td>${session.video_source}</td>
+                        <td>${session.model_used}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Error loading session history:', error);
+            }
+        }
+
+        // Connect WebSocket when page loads
+        connectWebSocket();
+
+        // Load initial session history
+        loadSessionHistory();
+
+        // Refresh session history every 5 seconds
+        setInterval(loadSessionHistory, 5000);
+
+        function updateSessionSummary(summary) {
+            if (!summary) return;
+            
+            // Update basic session info
+            document.getElementById('summary-duration').textContent = summary.duration;
+            document.getElementById('summary-frames').textContent = summary.total_frames;
+            document.getElementById('summary-source').textContent = summary.video_source;
+            document.getElementById('summary-model').textContent = summary.model_used;
+
+            // Process person classification data
+            const activeTracks = summary.active_tracks || {};
+            const classificationStats = {
+                ageGroups: {},
+                gender: {},
+                clothing: {},
+                activity: {}
+            };
+
+            // Process each tracked person
+            Object.entries(activeTracks).forEach(([trackId, track]) => {
+                if (track.class === 'person' && track.person_info) {
+                    Object.entries(track.person_info).forEach(([category, confidence]) => {
+                        if (category.includes('child') || category.includes('teenager') || 
+                            category.includes('adult') || category.includes('elderly')) {
+                            classificationStats.ageGroups[category] = (classificationStats.ageGroups[category] || 0) + 1;
+                        } else if (category === 'male' || category === 'female') {
+                            classificationStats.gender[category] = (classificationStats.gender[category] || 0) + 1;
+                        } else if (category === 'casual' || category === 'formal' || category === 'business') {
+                            classificationStats.clothing[category] = (classificationStats.clothing[category] || 0) + 1;
+                        } else if (category === 'standing' || category === 'sitting' || 
+                                 category === 'walking' || category === 'running') {
+                            classificationStats.activity[category] = (classificationStats.activity[category] || 0) + 1;
+                        }
+                    });
+                }
+            });
+
+            // Update classification statistics
+            updateCategoryStats('age-groups', classificationStats.ageGroups);
+            updateCategoryStats('gender-stats', classificationStats.gender);
+            updateCategoryStats('clothing-stats', classificationStats.clothing);
+            updateCategoryStats('activity-stats', classificationStats.activity);
+
+            // Update tracked people list
+            const trackedPeopleList = document.getElementById('tracked-people-list');
+            trackedPeopleList.innerHTML = '';
+            
+            Object.entries(activeTracks).forEach(([trackId, track]) => {
+                if (track.class === 'person' && track.person_info) {
+                    const personCard = document.createElement('div');
+                    personCard.className = 'person-card';
+                    
+                    let detailsHtml = `<h6>Person ID: ${trackId}</h6><div class="person-details">`;
+                    
+                    Object.entries(track.person_info).forEach(([category, confidence]) => {
+                        const confidenceClass = confidence > 0.7 ? 'confidence-high' : 
+                                             confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
+                        detailsHtml += `
+                            <div class="detail-item">
+                                <span class="stat-label">${category}:</span>
+                                <span class="stat-value ${confidenceClass}">${(confidence * 100).toFixed(1)}%</span>
+                            </div>`;
+                    });
+                    
+                    detailsHtml += '</div>';
+                    personCard.innerHTML = detailsHtml;
+                    trackedPeopleList.appendChild(personCard);
+                }
+            });
+        }
+
+        function updateCategoryStats(elementId, stats) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = '';
+            
+            Object.entries(stats).forEach(([category, count]) => {
+                const statItem = document.createElement('div');
+                statItem.className = 'stat-item';
+                statItem.innerHTML = `
+                    <span class="stat-label">${category}</span>
+                    <span class="stat-value">${count}</span>
+                `;
+                element.appendChild(statItem);
+            });
+        }
+    </script>
+</body>
+</html> 
