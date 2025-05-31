@@ -21,7 +21,7 @@ A real-time object detection and person classification system using YOLOv8 and R
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/live_detection.git
+git clone https://github.com/GG2GG/live_detection.git
 cd live_detection
 ```
 
