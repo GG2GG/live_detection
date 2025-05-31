@@ -243,6 +243,28 @@
         .confidence-low {
             color: #e74c3c;
         }
+
+        #recommended-video-viewer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 8px;
+            z-index: 1000;
+            width: 80%;
+            max-width: 800px;
+        }
+        
+        #recommended-video-viewer.hidden {
+            display: none;
+        }
+        
+        #recommended-video {
+            width: 100%;
+            max-height: 70vh;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
@@ -393,6 +415,21 @@
                 </div>
             </div>
         </div>
+
+        <!-- Recommended Video Viewer -->
+        <div id="recommended-video-viewer" class="hidden">
+            <h3>Recommended Content</h3>
+            <div class="video-container">
+                <video id="recommended-video" controls class="w-full rounded-lg shadow-lg">
+                    Your browser does not support the video tag.
+                </video>
+                <div class="mt-4 text-center">
+                    <button id="closeRecommendedBtn" class="control-button bg-red-600 hover:bg-red-700">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -450,24 +487,59 @@
                 }
                 
                 // Update live counts
-                const liveCountsDiv = document.getElementById('live-counts');
-                liveCountsDiv.innerHTML = '<h4>Current Objects:</h4>';
+                const liveCountsDiv = document.getElementById('liveCounts');
+                liveCountsDiv.innerHTML = '';
                 for (const [obj, count] of Object.entries(data.live_counts)) {
-                    liveCountsDiv.innerHTML += `<p>${obj}: ${count}</p>`;
+                    liveCountsDiv.innerHTML += `
+                        <div class="stat-item">
+                            <span class="stat-label">${obj}:</span>
+                            <span class="stat-value">${count}</span>
+                        </div>`;
                 }
                 
                 // Update tracking stats
-                const trackingStatsDiv = document.getElementById('tracking-stats');
-                trackingStatsDiv.innerHTML = `
-                    <h4>Tracking Analytics:</h4>
-                    <p>Total Unique IDs: ${data.analytics.total_unique_ids}</p>
-                    <p>Active Tracks: ${Object.keys(data.analytics.active_tracks).length}</p>
-                `;
+                totalIds.textContent = data.analytics.total_unique_ids;
+                trackCounts.innerHTML = '';
+                
+                // Update classification statistics from analytics
+                if (data.analytics.classification_history) {
+                    updateCategoryStats('age-groups', data.analytics.classification_history.age_groups);
+                    updateCategoryStats('gender-stats', data.analytics.classification_history.gender);
+                    updateCategoryStats('clothing-stats', data.analytics.classification_history.clothing);
+                    updateCategoryStats('activity-stats', data.analytics.classification_history.activity);
+                }
+                
+                // Update tracked people list
+                const trackedPeopleList = document.getElementById('tracked-people-list');
+                trackedPeopleList.innerHTML = '';
+                
+                if (data.active_tracks) {
+                    Object.entries(data.active_tracks).forEach(([trackId, track]) => {
+                        if (track.class === 'person' && track.person_info) {
+                            const personCard = document.createElement('div');
+                            personCard.className = 'person-card';
+                            
+                            let detailsHtml = `<h6>Person ID: ${trackId}</h6><div class="person-details">`;
+                            
+                            Object.entries(track.person_info).forEach(([category, confidence]) => {
+                                const confidenceClass = confidence > 0.7 ? 'confidence-high' : 
+                                                     confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
+                                detailsHtml += `
+                                    <div class="detail-item">
+                                        <span class="stat-label">${category}:</span>
+                                        <span class="stat-value ${confidenceClass}">${(confidence * 100).toFixed(1)}%</span>
+                                    </div>`;
+                            });
+                            
+                            detailsHtml += '</div>';
+                            personCard.innerHTML = detailsHtml;
+                            trackedPeopleList.appendChild(personCard);
+                        }
+                    });
+                }
                 
                 // Update play/pause button
-                const playPauseBtn = document.getElementById('playPauseBtn');
                 playPauseBtn.textContent = data.is_playing ? 'Pause' : 'Play';
-                playPauseBtn.className = data.is_playing ? 'control-btn playing' : 'control-btn paused';
                 
                 // Update model info
                 document.getElementById('current-model').textContent = data.current_model;
@@ -623,6 +695,15 @@
                 const summaryDiv = document.getElementById('session-summary');
                 summaryDiv.classList.remove('hidden');
                 updateSessionSummary(result.summary);
+                
+                // Check for recommended video
+                if (result.recommended_video) {
+                    const videoViewer = document.getElementById('recommended-video-viewer');
+                    const videoPlayer = document.getElementById('recommended-video');
+                    videoPlayer.src = result.recommended_video;
+                    videoViewer.classList.remove('hidden');
+                    videoPlayer.play();
+                }
             } catch (error) {
                 console.error('Stop inference error:', error);
             }
@@ -685,71 +766,49 @@
             document.getElementById('summary-source').textContent = summary.video_source;
             document.getElementById('summary-model').textContent = summary.model_used;
 
-            // Process person classification data
-            const activeTracks = summary.active_tracks || {};
-            const classificationStats = {
-                ageGroups: {},
-                gender: {},
-                clothing: {},
-                activity: {}
-            };
-
-            // Process each tracked person
-            Object.entries(activeTracks).forEach(([trackId, track]) => {
-                if (track.class === 'person' && track.person_info) {
-                    Object.entries(track.person_info).forEach(([category, confidence]) => {
-                        if (category.includes('child') || category.includes('teenager') || 
-                            category.includes('adult') || category.includes('elderly')) {
-                            classificationStats.ageGroups[category] = (classificationStats.ageGroups[category] || 0) + 1;
-                        } else if (category === 'male' || category === 'female') {
-                            classificationStats.gender[category] = (classificationStats.gender[category] || 0) + 1;
-                        } else if (category === 'casual' || category === 'formal' || category === 'business') {
-                            classificationStats.clothing[category] = (classificationStats.clothing[category] || 0) + 1;
-                        } else if (category === 'standing' || category === 'sitting' || 
-                                 category === 'walking' || category === 'running') {
-                            classificationStats.activity[category] = (classificationStats.activity[category] || 0) + 1;
-                        }
-                    });
-                }
-            });
-
-            // Update classification statistics
-            updateCategoryStats('age-groups', classificationStats.ageGroups);
-            updateCategoryStats('gender-stats', classificationStats.gender);
-            updateCategoryStats('clothing-stats', classificationStats.clothing);
-            updateCategoryStats('activity-stats', classificationStats.activity);
+            // Update classification statistics from history
+            if (summary.classification_history) {
+                updateCategoryStats('age-groups', summary.classification_history.age_groups);
+                updateCategoryStats('gender-stats', summary.classification_history.gender);
+                updateCategoryStats('clothing-stats', summary.classification_history.clothing);
+                updateCategoryStats('activity-stats', summary.classification_history.activity);
+            }
 
             // Update tracked people list
             const trackedPeopleList = document.getElementById('tracked-people-list');
             trackedPeopleList.innerHTML = '';
             
-            Object.entries(activeTracks).forEach(([trackId, track]) => {
-                if (track.class === 'person' && track.person_info) {
-                    const personCard = document.createElement('div');
-                    personCard.className = 'person-card';
-                    
-                    let detailsHtml = `<h6>Person ID: ${trackId}</h6><div class="person-details">`;
-                    
-                    Object.entries(track.person_info).forEach(([category, confidence]) => {
-                        const confidenceClass = confidence > 0.7 ? 'confidence-high' : 
-                                             confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
-                        detailsHtml += `
-                            <div class="detail-item">
-                                <span class="stat-label">${category}:</span>
-                                <span class="stat-value ${confidenceClass}">${(confidence * 100).toFixed(1)}%</span>
-                            </div>`;
-                    });
-                    
-                    detailsHtml += '</div>';
-                    personCard.innerHTML = detailsHtml;
-                    trackedPeopleList.appendChild(personCard);
-                }
-            });
+            if (summary.active_tracks) {
+                Object.entries(summary.active_tracks).forEach(([trackId, track]) => {
+                    if (track.class === 'person' && track.person_info) {
+                        const personCard = document.createElement('div');
+                        personCard.className = 'person-card';
+                        
+                        let detailsHtml = `<h6>Person ID: ${trackId}</h6><div class="person-details">`;
+                        
+                        Object.entries(track.person_info).forEach(([category, confidence]) => {
+                            const confidenceClass = confidence > 0.7 ? 'confidence-high' : 
+                                                 confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
+                            detailsHtml += `
+                                <div class="detail-item">
+                                    <span class="stat-label">${category}:</span>
+                                    <span class="stat-value ${confidenceClass}">${(confidence * 100).toFixed(1)}%</span>
+                                </div>`;
+                        });
+                        
+                        detailsHtml += '</div>';
+                        personCard.innerHTML = detailsHtml;
+                        trackedPeopleList.appendChild(personCard);
+                    }
+                });
+            }
         }
 
         function updateCategoryStats(elementId, stats) {
             const element = document.getElementById(elementId);
             element.innerHTML = '';
+            
+            if (!stats) return;
             
             Object.entries(stats).forEach(([category, count]) => {
                 const statItem = document.createElement('div');
@@ -763,4 +822,4 @@
         }
     </script>
 </body>
-</html> 
+</html>

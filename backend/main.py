@@ -118,6 +118,12 @@ class SessionManager:
         self.current_session = None
         self.session_counter = 0
         self.active_tracks = {}  # Track active objects by ID
+        self.classification_history = {
+            'age_groups': defaultdict(int),
+            'gender': defaultdict(int),
+            'clothing': defaultdict(int),
+            'activity': defaultdict(int)
+        }
 
     def create_session(self, source_type="webcam", source_id=0):
         session_id = f"session_{self.session_counter}"
@@ -130,7 +136,13 @@ class SessionManager:
             "video_source": f"{source_type}:{source_id}",
             "model_used": current_model_name,
             "active_tracks": {},
-            "track_history": defaultdict(list)
+            "track_history": defaultdict(list),
+            "classification_history": {
+                'age_groups': defaultdict(int),
+                'gender': defaultdict(int),
+                'clothing': defaultdict(int),
+                'activity': defaultdict(int)
+            }
         }
         self.current_session = session_id
         return session_id
@@ -146,12 +158,27 @@ class SessionManager:
             self.sessions[session_id]["total_frames"] += 1
             self.sessions[session_id]["active_tracks"] = active_tracks
             
-            # Update track history
+            # Update track history and classification data
             for track_id, track_info in active_tracks.items():
+                if track_info["class"] == "person" and "person_info" in track_info:
+                    # Update classification history
+                    for category, confidence in track_info["person_info"].items():
+                        if confidence > 0.3:  # Only count classifications with confidence > 30%
+                            if category in ['child', 'teenager', 'young_adult', 'adult', 'elderly']:
+                                self.sessions[session_id]["classification_history"]['age_groups'][category] += 1
+                            elif category in ['male', 'female']:
+                                self.sessions[session_id]["classification_history"]['gender'][category] += 1
+                            elif category in ['casual', 'formal', 'business']:
+                                self.sessions[session_id]["classification_history"]['clothing'][category] += 1
+                            elif category in ['standing', 'sitting', 'walking', 'running']:
+                                self.sessions[session_id]["classification_history"]['activity'][category] += 1
+                
+                # Update track history
                 self.sessions[session_id]["track_history"][track_id].append({
                     "frame": self.sessions[session_id]["total_frames"],
                     "class": track_info["class"],
-                    "confidence": track_info["confidence"]
+                    "confidence": track_info["confidence"],
+                    "person_info": track_info.get("person_info", {})
                 })
 
     def get_session_summary(self, session_id):
@@ -174,7 +201,8 @@ class SessionManager:
                 "unique_objects": {k: len(v) for k, v in unique_objects.items()},
                 "video_source": session["video_source"],
                 "model_used": session["model_used"],
-                "active_tracks": session["active_tracks"]
+                "active_tracks": session["active_tracks"],
+                "classification_history": session["classification_history"]
             }
         return None
 
@@ -266,6 +294,12 @@ class Tracker:
         self.confidence_threshold = 0.4
         self.iou_threshold = 0.5
         self.active_tracks = {}
+        self.classification_history = {
+            'age_groups': defaultdict(int),
+            'gender': defaultdict(int),
+            'clothing': defaultdict(int),
+            'activity': defaultdict(int)
+        }
         logger.info("Tracker initialized successfully")
 
     def _init_capture(self, video_source):
@@ -387,6 +421,19 @@ class Tracker:
                         person_info = {}
                         if class_name == 'person' and person_classifier is not None:
                             person_info = classify_person(frame, (x1, y1, x2, y2))
+                            
+                            # Update classification history
+                            if person_info:
+                                for category, confidence in person_info.items():
+                                    if confidence > 0.3:  # Only count classifications with confidence > 30%
+                                        if category in ['child', 'teenager', 'young_adult', 'adult', 'elderly']:
+                                            self.classification_history['age_groups'][category] += 1
+                                        elif category in ['male', 'female']:
+                                            self.classification_history['gender'][category] += 1
+                                        elif category in ['casual', 'formal', 'business']:
+                                            self.classification_history['clothing'][category] += 1
+                                        elif category in ['standing', 'sitting', 'walking', 'running']:
+                                            self.classification_history['activity'][category] += 1
                         
                         label = f"{class_name} {track_id} {conf:.2f}"
                         if person_info:
@@ -418,7 +465,8 @@ class Tracker:
         return {
             "total_unique_ids": len(self.track_id_count),
             "track_appearance_counts": dict(self.track_id_count),
-            "active_tracks": self.active_tracks
+            "active_tracks": self.active_tracks,
+            "classification_history": self.classification_history
         }
 
     def release(self):
@@ -427,7 +475,49 @@ class Tracker:
         if hasattr(self, 'cap'):
             self.cap.release()
 
-tracker = Tracker(0)
+# Global variables for server state
+server_state = {
+    "is_running": False,
+    "current_session": None,
+    "tracker": None
+}
+
+def initialize_server():
+    global server_state
+    if not server_state["is_running"]:
+        server_state["tracker"] = Tracker(0)  # Initialize with webcam
+        server_state["is_running"] = True
+        logger.info("Server initialized successfully")
+
+def restart_session(source_type="webcam", source_id=0):
+    global server_state
+    if server_state["tracker"]:
+        # End current session if exists
+        if server_state["current_session"]:
+            session_manager.end_session(server_state["current_session"])
+        
+        # Create new session
+        session_id = session_manager.create_session(source_type, source_id)
+        server_state["current_session"] = session_id
+        
+        # Reset tracker state
+        server_state["tracker"].track_id_count.clear()
+        server_state["tracker"].live_counts.clear()
+        server_state["tracker"].active_tracks.clear()
+        server_state["tracker"].classification_history = {
+            'age_groups': defaultdict(int),
+            'gender': defaultdict(int),
+            'clothing': defaultdict(int),
+            'activity': defaultdict(int)
+        }
+        
+        logger.info(f"Session restarted with source: {source_type}:{source_id}")
+        return session_id
+    return None
+
+@app.on_event("startup")
+async def startup_event():
+    initialize_server()
 
 @app.get("/", response_class=HTMLResponse)
 def root():
@@ -444,10 +534,16 @@ async def upload_video(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        session_id = session_manager.create_session("video", str(file_path))
-        session_manager.sessions[session_id]["video_source"] = str(file_path)
+        # Restart session with new video
+        session_id = restart_session("video", str(file_path))
+        if not session_id:
+            return JSONResponse(
+                status_code=500,
+                content={"message": "Failed to restart session"}
+            )
         
-        success = tracker.set_source(str(file_path))
+        # Set video source
+        success = server_state["tracker"].set_source(str(file_path))
         if not success:
             return JSONResponse(
                 status_code=400,
@@ -464,8 +560,16 @@ async def upload_video(file: UploadFile = File(...)):
 @app.post("/webcam")
 async def switch_to_webcam(webcam_id: int = Form(0)):
     try:
-        session_id = session_manager.create_session("webcam", webcam_id)
-        success = tracker.set_source(webcam_id)
+        # Restart session with webcam
+        session_id = restart_session("webcam", webcam_id)
+        if not session_id:
+            return JSONResponse(
+                status_code=500,
+                content={"message": "Failed to restart session"}
+            )
+        
+        # Set webcam source
+        success = server_state["tracker"].set_source(webcam_id)
         if not success:
             return JSONResponse(
                 status_code=400,
@@ -481,7 +585,7 @@ async def switch_to_webcam(webcam_id: int = Form(0)):
 @app.post("/model")
 async def change_model(model_name: str = Form(...)):
     try:
-        success = tracker.set_model(model_name)
+        success = server_state["tracker"].set_model(model_name)
         if not success:
             return JSONResponse(
                 status_code=400,
@@ -497,7 +601,7 @@ async def change_model(model_name: str = Form(...)):
 @app.post("/confidence")
 async def set_confidence(threshold: float = Form(...)):
     try:
-        tracker.set_confidence_threshold(threshold)
+        server_state["tracker"].set_confidence_threshold(threshold)
         return {"message": f"Confidence threshold set to {threshold}"}
     except Exception as e:
         return JSONResponse(
@@ -508,10 +612,10 @@ async def set_confidence(threshold: float = Form(...)):
 @app.post("/control")
 async def control_playback(action: str = Form(...)):
     if action == "toggle":
-        is_playing = tracker.toggle_playback()
-        if not is_playing and session_manager.current_session:
+        is_playing = server_state["tracker"].toggle_playback()
+        if not is_playing and server_state["current_session"]:
             # Get session summary when pausing
-            summary = session_manager.get_session_summary(session_manager.current_session)
+            summary = session_manager.get_session_summary(server_state["current_session"])
             return {
                 "is_playing": is_playing,
                 "summary": summary
@@ -519,13 +623,30 @@ async def control_playback(action: str = Form(...)):
         return {"is_playing": is_playing}
     elif action == "stop":
         # Stop the inference
-        tracker.is_playing = False
-        if session_manager.current_session:
+        server_state["tracker"].is_playing = False
+        if server_state["current_session"]:
             # End the current session and get final summary
-            summary = session_manager.end_session(session_manager.current_session)
+            summary = session_manager.end_session(server_state["current_session"])
+            
+            # Check classification results and recommend video
+            recommended_video = None
+            if summary and "classification_history" in summary:
+                gender_stats = summary["classification_history"].get("gender", {})
+                age_stats = summary["classification_history"].get("age_groups", {})
+                
+                # Count males and kids
+                male_count = gender_stats.get("male", 0)
+                kids_count = sum(age_stats.get(age, 0) for age in ["child", "teenager"])
+                
+                if male_count > 0:
+                    recommended_video = "/Users/gg/Documents/live_detection/ajio.mp4"
+                elif kids_count > 5:
+                    recommended_video = "/Users/gg/Documents/live_detection/kid.mp4"
+            
             return {
                 "is_playing": False,
-                "summary": summary
+                "summary": summary,
+                "recommended_video": recommended_video
             }
         return {"is_playing": False}
     return {"error": "Invalid action"}
@@ -542,6 +663,31 @@ async def get_session(session_id: str):
 async def get_available_models():
     return {"models": list(YOLO_MODELS.keys())}
 
+@app.get("/recommended-video")
+async def get_recommended_video():
+    if not server_state["current_session"]:
+        return {"error": "No active session"}
+        
+    summary = session_manager.get_session_summary(server_state["current_session"])
+    if not summary:
+        return {"error": "No session summary available"}
+        
+    recommended_video = None
+    if "classification_history" in summary:
+        gender_stats = summary["classification_history"].get("gender", {})
+        age_stats = summary["classification_history"].get("age_groups", {})
+        
+        # Count males and kids
+        male_count = gender_stats.get("male", 0)
+        kids_count = sum(age_stats.get(age, 0) for age in ["child", "teenager"])
+        
+        if male_count > 0:
+            recommended_video = "/Users/gg/Documents/live_detection/ajio.mp4"
+        elif kids_count > 5:
+            recommended_video = "/Users/gg/Documents/live_detection/kid.mp4"
+    
+    return {"recommended_video": recommended_video}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     logger.info("New WebSocket connection request")
@@ -549,25 +695,42 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info("WebSocket connection accepted")
     try:
         while True:
-            frame, live_counts, active_tracks = await tracker.get_tracked_frame()
+            if not server_state["is_running"] or not server_state["tracker"]:
+                await asyncio.sleep(0.1)
+                continue
+                
+            frame, live_counts, active_tracks = await server_state["tracker"].get_tracked_frame()
             if frame is None:
                 await asyncio.sleep(0.01)
                 continue
             
-            if session_manager.current_session:
-                session_manager.update_session(session_manager.current_session, live_counts, active_tracks)
+            if server_state["current_session"]:
+                session_manager.update_session(server_state["current_session"], live_counts, active_tracks)
             
             try:
                 _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 data = base64.b64encode(jpeg.tobytes()).decode('utf-8')
                 
+                # Process active tracks to ensure person_info is included
+                processed_tracks = {}
+                for track_id, track_info in active_tracks.items():
+                    if track_info["class"] == "person" and "person_info" in track_info:
+                        processed_tracks[track_id] = {
+                            "class": track_info["class"],
+                            "confidence": track_info["confidence"],
+                            "bbox": track_info["bbox"],
+                            "person_info": track_info["person_info"]
+                        }
+                    else:
+                        processed_tracks[track_id] = track_info
+                
                 message = {
                     "frame": data,
                     "live_counts": live_counts,
-                    "analytics": tracker.get_analytics(),
-                    "is_playing": tracker.is_playing,
+                    "analytics": server_state["tracker"].get_analytics(),
+                    "is_playing": server_state["tracker"].is_playing,
                     "current_model": current_model_name,
-                    "active_tracks": active_tracks
+                    "active_tracks": processed_tracks
                 }
                 
                 await websocket.send_json(message)
@@ -583,14 +746,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.on_event("shutdown")
 def shutdown_event():
-    tracker.release()
-    if session_manager.current_session:
-        session_manager.end_session(session_manager.current_session)
-    analytics = tracker.get_analytics()
+    if server_state["tracker"]:
+        server_state["tracker"].release()
+    if server_state["current_session"]:
+        session_manager.end_session(server_state["current_session"])
+    server_state["is_running"] = False
+    analytics = server_state["tracker"].get_analytics() if server_state["tracker"] else {}
     logger.info("\nSession Analytics\n================")
-    logger.info(f"Total unique IDs tracked: {analytics['total_unique_ids']}")
+    logger.info(f"Total unique IDs tracked: {analytics.get('total_unique_ids', 0)}")
     logger.info("Track appearance counts:")
-    for tid, count in analytics['track_appearance_counts'].items():
+    for tid, count in analytics.get('track_appearance_counts', {}).items():
         logger.info(f" - ID {tid}: {count} frames")
 
 if __name__ == "__main__":
